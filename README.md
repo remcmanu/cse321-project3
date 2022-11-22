@@ -20,7 +20,7 @@ Date:
 |---------|------------|---------|------|---------|-----------|
 |Bill of Materials|Source of materials to reproduce product||cse321-project3-BOM.xlsx|||
 |IR Sensor|Infrared sensor|register touchless input|[link](https://components101.com/sites/default/files/component_datasheet/Datasheet%20of%20IR%20%20Sensor.pdf)|3|pin layout|
-|         |            |         |      |         |           |
+|7 Segment||Display info with larger font|[link](https://components101.com/displays/tm1637-grove-4-digit-display-module)||pin layout|
 
 
 ## Features
