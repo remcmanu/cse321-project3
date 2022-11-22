@@ -5,7 +5,15 @@
 CSE 321 Project 3
 
 Project Description: 
-	Project 3 is centered around building a combination lock / security system. Using a matrix keypad, we enter an input (in this case the last 4 digits of our person number). This will update a lock state, displayed on an external LCD. For bonus points, a reset mechanism (in this case pressing the '*' symbol) was included to restart typing in a password at any point.
+	Project 3 is centered around building a combination lock / security system like in project 2. 
+    However, this time alongside the matrix keypad several accommodations are made for accessibility.
+    One enters an input on the matrix keypad numerically, or alternatively through the use of IR sensors
+    and binary to accommodate those who can't press buttons.
+    Likewise, the output is displayed on the LCD again, but also on a series of 7 segment displays, the
+    larger font helping the visually impaired. A buzzer will give tactile/audio feedback for the further
+    impaired. Lock status will be redundantly reported with LEDs.
+    Input is in this case the last 4 digits of a UBIT person number. This will update a lock state, 
+    displayed on an external LCD.
 
 Contribitor List:
 	remcmanu@buffalo.edu
@@ -39,6 +47,7 @@ Date:
 ## Required Materials + Getting Started
 
 - Nucleo L4R5ZI
+- Breadboard
 - LCD 1802 & Bus
  	GND - GND
  	VCC - +5V
@@ -60,7 +69,7 @@ Date:
  	-> Set to output in GPIO, connected with ORANGE WIRES in demo.
 	--> Bus numbers labelled right to left (7..0)
 - 12+X jumper wires (male to male) connected as written above
-- 7 Segment Display
+- 7 Segment Displays (4 at the moment, perhaps more)
 - IR Sensors (8)
 - Buzzer
 
@@ -76,6 +85,8 @@ Date:
  	pg 342: GPIO
 - https://components101.com/sites/default/files/component_datasheet/Datasheet%20of%20IR%20%20Sensor.pdf)
     pg 3: IR Sensor pin layout
+- https://components101.com/displays/tm1637-grove-4-digit-display-module
+    pg 1: 7 Segment pin layout
 
 ## Files
 
