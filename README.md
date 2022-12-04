@@ -19,7 +19,7 @@ Project Description:
     displayed on an external LCD.
 
 Contribitor List:
-	remcmanu@buffalo.edu
+	Robert McManus - remcmanu@buffalo.edu
 
 Date:
 	11-21-2022s
