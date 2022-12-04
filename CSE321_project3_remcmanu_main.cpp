@@ -16,7 +16,7 @@
  * @peripherals:    
  *                  Matrix Keypad (bus labelled right to left, i.e. 7..0)
  *                  IR Sensor
- *                  Buzzer
+ *                  Vibration Motor
  *                  LCD 1802
  *                  7-Segment Display
  *                  
@@ -28,16 +28,12 @@
  *                      0 - Col 3 - PD_3
  *                   -> Set to input in GPIO, connected with BLUE WIRES in demo.
  *
- *                  IR Sensors (8)
- *                      7 - PX_X
- *                      6 - PX_X
- *                      5 - PX_X
- *                      4 - PX_X
- *                      3 - PX_X
- *                      2 - PX_X
- *                      1 - PX_X
- *                      0 - PX_X
- *                   -> Set to input in GPIO, connected with BLUE WIRES in demo.
+ *                  IR Sensors (4)
+ *                      3 - PC_3
+ *                      2 - PC_2
+ *                      1 - PC_1
+ *                      0 - PC_0
+ *                   -> Set to input in GPIO, connected with PURPLE/GREEN WIRES in demo.
  * @outputs:        
  *                  Matrix Keypad's Rows
  *                      7 - Row 0 - PB_0
@@ -54,7 +50,10 @@
  *                   ->  PB_8/9 labelled SCL/SDA respectively. Not using these gave error.   
  *                  Blue User LED on PB_7
  *
- *                  Buzzer
+ *                  Vibration Motor
+ *                      GND - GND
+ *                      POWER - PB_6
+ *                  -> Set to output in GPIO, connected with BLUE WIRE in demo.
  *
  *                  7 Segment Display
  * 
@@ -73,20 +72,35 @@
 #include "PinNames.h"
 #include "1802.h"
 #include "InterruptIn.h"
+#include <string>
 
 #define WAITTIME   100000       // defines how long to wait for bounce
 
 void col0handler (void);        // values 1, 4, 7, *
 void col1handler (void);        // values 2, 5, 8, 0
 void col2handler (void);        // values 3, 6, 9, #
-bool areEqual (char array1 [], char array2 []);
-void blipLED (void);
 
-char last_pressed = NULL;
-char password [4];
-int row;
-int entered_digits = 0;
+bool areEqual (char array1 [], char array2 []);
+void enterPasswordDigit (char);
+void checkPassword (void);
+void resetPassword (void);
+
+void blipLED (void);
+void vibrate (int);
+void vibrateSequence (int, int, int);
+
+void pollMatrixKeypad (void);
+void pollIRSensors (void);
+
 int state = 0;
+char password [4];
+int entered_digits = 0;
+
+char lastMatrixPress = NULL;
+int row;
+
+int last_irSensorReading = 0;
+int consecutiveIRReading = 0;
 
 InterruptIn col0 (PD_0, PullDown);
 InterruptIn col1 (PD_1, PullDown);
@@ -97,18 +111,17 @@ CSE321_LCD LCD_Screen (16, 2, LCD_5x8DOTS, PB_9, PB_8); // col, row, dots, SDA, 
 int main()
 {
     
-    /* Setup LCD */
+    // /* Setup LCD */
     LCD_Screen.begin();
     LCD_Screen.print ("Locked");
     
     /* Setup GPIO */
-    RCC->AHB2ENR |= 0xA;                // peripheral clock: GPIO ports B, D enabled (1010 -> 0xA)
-    GPIOB->MODER &= ~(0xC0FF);          // output - 01 (1100 0000 1111 1111 -> 0xC0FF)
-    GPIOB->MODER |= 0x4055;             //             (0100 0000 0101 0101 -> 0x4055)
-    GPIOD->MODER &= ~(0x3F);            // input  - 00 (0011 1111 -> 0x3F)
-
-    blipLED ();                         // flash LED to indicate program has started
-
+    RCC->AHB2ENR |= 0xE;                // peripheral clock: GPIO ports B, C, D enabled (1110 -> 0xE)
+    GPIOB->MODER &= ~(0xF0FF);          // output - 01 (1111 0000 1111 1111 -> 0xF0FF)
+    GPIOB->MODER |= 0x5055;             //             (0101 0100 0101 0101 -> 0x5055)
+    GPIOC->MODER &= ~(0xFF);            // input  - 00 (1111 1111 -> 0xFF)
+    GPIOD->MODER &= ~(0xFF);            // input  - 00 (1111 1111 -> 0xFF)
+    
     /* Setup Interrupts */
     col0.rise (&col0handler);
     col0.enable_irq();
@@ -117,125 +130,159 @@ int main()
     col2.rise (&col2handler);
     col2.enable_irq();
 
-    /* poll matrix keypad */
+    blipLED ();                         // flash LED to indicate program has started
+    vibrate (500);                      // buzz vibration motor to the same end
+
+    // LOOP
     while (true) 
     {
-        if (last_pressed != NULL)
+        /* poll matrix keypad */
+        pollMatrixKeypad();
+        /* poll IR sensors */
+        pollIRSensors ();
+    }
+}
+
+
+/* Checks two arrays have the same values in the same order. */
+bool
+areEqual (char array1 [], char array2 [])
+{
+    for (int i = 0; i < 4; i++) if (array1 [i] != array2 [i]) return false;   
+    return true;
+}
+
+/* Turns on Blue User LED for WAITTIME. */
+void
+blipLED (void)
+{
+    // Blue user LED on PB_7
+    GPIOB->ODR |= 0x80; // turn on LED (1000 0000 -> 0x80)
+    wait_us (WAITTIME); // useful so you can't press button again in the meantime (2s)
+    GPIOB->ODR &= ~(0x80); // turn off LED (1000 0000 -> 0x80)
+}
+
+/* Turns on vibrating motor for MS miliseconds. */
+void
+vibrate (int ms)
+{
+    // Vibrating Motor on PB_6
+    GPIOB->ODR |= 0x40; // turn on motor (0100 0000 -> 0x40)
+    wait_us (ms * 1000); // useful so you can't press button again in the meantime (2s)
+    GPIOB->ODR &= ~(0x40); // turn off motor (0100 0000 -> 0x40)
+}
+
+void
+vibrateSequence (int vibrateLength, int pauseLength, int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        vibrate (vibrateLength);
+        if (i != count - 1) wait_us (pauseLength);  // don't pause after last buzz
+    }
+}
+
+// buzzForPattern (list_of_high/low, list_of_delays)
+
+/* Enter a character into the password. */
+void
+enterPasswordDigit (char digit)
+{
+    if (state) return;
+    blipLED();
+    if (entered_digits + 1 != 4) vibrate (250);     // don't vibrate on last digit, so status can be heard clearly
+    password [entered_digits] = digit;
+    entered_digits++;
+    LCD_Screen.setCursor(entered_digits - 1, 1);
+    LCD_Screen.print (&digit);
+    LCD_Screen.setCursor(entered_digits, 1);
+    LCD_Screen.print (" ");                         // clear weird character when printing digit list
+    if (entered_digits > 1)
+    {
+        // obfuscate prior digit entries by replacing with asterik
+        LCD_Screen.setCursor(entered_digits - 2, 1);
+        LCD_Screen.print("*");
+    }
+    if (entered_digits == 4) checkPassword ();
+}
+
+/* Check password against hard coded password (last 4-digits of UB ID number */
+void
+checkPassword (void)
+{
+    char unencryptedPasswordSoSafe [4] = {'2', '6', '6', '2'};
+    if (areEqual (password, unencryptedPasswordSoSafe))
+    {
+        // success
+        state = 1;
+        LCD_Screen.clear();
+        LCD_Screen.setCursor(0, 0);
+        LCD_Screen.print("Unlocked");
+        vibrateSequence (250, 250 * 1000, 3);   // 3 short pulses indicate successful login
+    }
+    else {
+        // failure
+        LCD_Screen.setCursor(0, 1);
+        LCD_Screen.print("Incorrect PWD");
+        wait_us (1000000); // wait for a second, then reset
+        resetPassword ();
+    }
+}
+
+/* Re-locks the device, and resets LCD */
+void
+resetPassword (void)
+{
+    state = 0;
+    LCD_Screen.clear();
+    LCD_Screen.setCursor(0, 0);
+    LCD_Screen.print("Locked");
+    vibrateSequence (750, 250 * 1000, 3); // 3 medium pulses indicate reset password
+    entered_digits = 0;
+}
+
+void
+pollMatrixKeypad (void)
+{
+        if (lastMatrixPress != NULL)
         {
-            switch (last_pressed)
+            switch (lastMatrixPress)
             {
                 case '1':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("1");
+                    enterPasswordDigit ('1');
                     break;
                 case '2':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("2");
+                    enterPasswordDigit ('2');
                     break;
                 case '3':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("3");
+                    enterPasswordDigit ('3');
                     break;
                 case '4':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("4");
+                    enterPasswordDigit ('4');
                     break;
                 case '5':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("5");
+                    enterPasswordDigit ('5');
                     break;
                 case '6':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("6");
+                    enterPasswordDigit ('6');
                     break;
                 case '7':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("7");
+                    enterPasswordDigit ('7');
                     break;
                 case '8':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("8");
+                    enterPasswordDigit ('8');
                     break;
                 case '9':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("9");
-                    break;
-                case '*':
-                    // reset
-                    state = 0;
-                    LCD_Screen.clear();
-                    LCD_Screen.setCursor(0, 0);
-                    LCD_Screen.print("Locked");
-                    entered_digits = 0;
+                    enterPasswordDigit ('9');
                     break;
                 case '0':
-                    if (state) break;
-                    password [entered_digits] = last_pressed;
-                    entered_digits++;
-                    LCD_Screen.setCursor(entered_digits - 1, 1);
-                    LCD_Screen.print("0");
+                    enterPasswordDigit ('0');
+                    break;
+                case '*':
+                    resetPassword();
                     break;
             }
-
-            if (entered_digits > 1)
-            {
-                // obfuscate prior digit entries by replacing with asterik
-                LCD_Screen.setCursor(entered_digits - 2, 1);
-                LCD_Screen.print("*");
-            }
-
-            if (entered_digits == 4)
-            {
-                // check password
-                char unencryptedPasswordSoSafe [4] = {'2', '6', '6', '2'};
-                if (areEqual (password, unencryptedPasswordSoSafe))
-                {
-                    // success
-                    state = 1;
-                    LCD_Screen.clear();
-                    LCD_Screen.setCursor(0, 0);
-                    LCD_Screen.print("Unlocked");
-                }
-                else {
-                    // failure
-                    LCD_Screen.setCursor(0, 1);
-                    LCD_Screen.print("Incorrect PWD");
-                    wait_us (1000000); // wait for a second, then reset
-                    LCD_Screen.clear();
-                    LCD_Screen.setCursor(0, 0);
-                    LCD_Screen.print("Locked");
-                    entered_digits = 0;
-                }
-            }
-
-            last_pressed = NULL;
+            lastMatrixPress = NULL;
         }
 
         // toggle row 0 (PB0)
@@ -262,6 +309,65 @@ int main()
         row = 3;
         wait_ns (WAITTIME);             // deals with bounce
     }
+
+void
+pollIRSensors (void)
+{
+        // get input
+        int irSensorReading = GPIOC->IDR | 0xFFFFFFF0;
+                                        // ignore other values (..1111 1111 1111 0000 -> 0x..FFF0)
+        irSensorReading = ~(irSensorReading);
+                                        // invert because 0 means IR triggered
+
+        // USER needs to hold the same value for a time to verify, i.e. WAITTIME * 20
+        wait_us (WAITTIME);
+        if (irSensorReading != last_irSensorReading || irSensorReading == 0)
+        {
+            last_irSensorReading = irSensorReading;
+            consecutiveIRReading = 0;
+            return;
+        }
+        consecutiveIRReading++;
+        if (consecutiveIRReading < 5) return;
+
+        switch (irSensorReading)
+        {
+            case 1:
+                enterPasswordDigit ('1');
+                break;
+            case 2:
+                enterPasswordDigit ('2');
+                break;
+            case 3:
+                enterPasswordDigit ('3');
+                break;
+            case 4:
+                enterPasswordDigit ('4');
+                break;
+            case 5:
+                enterPasswordDigit ('5');
+                break;
+            case 6:
+                enterPasswordDigit ('6');
+                break;
+            case 7:
+                enterPasswordDigit ('7');
+                break;
+            case 8:
+                enterPasswordDigit ('8');
+                break;
+            case 9:
+                enterPasswordDigit ('9');
+                break;
+            case 10:
+                enterPasswordDigit ('0');
+                break;
+            case 15:
+                resetPassword ();
+                break;
+        }
+        irSensorReading = 0;
+        consecutiveIRReading = 0;
 }
 
 void
@@ -270,19 +376,18 @@ col0handler (void)
     switch (row)
     {
         case 0:
-            last_pressed = '1';
+            lastMatrixPress = '1';
             break;
         case 1:
-            last_pressed = '4'; 
+            lastMatrixPress = '4'; 
             break;
         case 2:
-            last_pressed = '7';
+            lastMatrixPress = '7';
             break;
         case 3:
-            last_pressed = '*';
+            lastMatrixPress = '*';
             break;
     }
-    blipLED();
 }
 
 void
@@ -291,19 +396,18 @@ col1handler (void)
     switch (row)
     {
         case 0:
-            last_pressed = '2';
+            lastMatrixPress = '2';
             break;
         case 1:
-            last_pressed = '5'; 
+            lastMatrixPress = '5'; 
             break;
         case 2:
-            last_pressed = '8';
+            lastMatrixPress = '8';
             break;
         case 3:
-            last_pressed = '0';
+            lastMatrixPress = '0';
             break;
     }
-    blipLED();
 }
 
 void
@@ -312,35 +416,16 @@ col2handler (void)
     switch (row)
     {
         case 0:
-            last_pressed = '3';
+            lastMatrixPress = '3';
             break;
         case 1:
-            last_pressed = '6'; 
+            lastMatrixPress = '6'; 
             break;
         case 2:
-            last_pressed = '9';
+            lastMatrixPress = '9';
             break;
         case 3:
-            last_pressed = '#';
+            lastMatrixPress = '#';
             break;
     }
-    blipLED();
-}
-
-/* Checks two arrays have the same values in the same order. */
-bool
-areEqual (char array1 [], char array2 [])
-{
-    for (int i = 0; i < 4; i++) if (array1 [i] != array2 [i]) return false;   
-    return true;
-}
-
-/* Turns on Blue User LED for WAITTIME. */
-void
-blipLED (void)
-{
-    // Blue user LED on PB_7
-    GPIOB->ODR |= 0x80; // turn on LED (1000 0000 -> 0x80)
-    wait_us (WAITTIME); // useful so you can't press button again in the meantime (2s)
-    GPIOB->ODR &= ~(0x80); // turn off LED (1000 0000 -> 0x80)
 }
