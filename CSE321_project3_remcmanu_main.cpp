@@ -3,7 +3,7 @@
  * @authors:        Robert E McManus
  * @contact:        remcmanu@buffalo.edu
  * 
- * @date:           11-21-2022
+ * @date:           12-05-2022
  * @course:         CSE 321
  * @assignment:     Project 3
  * 
@@ -67,6 +67,7 @@
  *                      pg 342: GPIO
  */
 
+#include "EventQueue.h"
 #include "PinNamesTypes.h"
 #include "mbed.h"
 #include "PinNames.h"
@@ -74,11 +75,11 @@
 #include "InterruptIn.h"
 #include <string>
 
-#define WAITTIME   100000       // defines how long to wait for bounce
+#define WAITTIME   100000                           // defines how long to wait for bounce
 
-void col0handler (void);        // values 1, 4, 7, *
-void col1handler (void);        // values 2, 5, 8, 0
-void col2handler (void);        // values 3, 6, 9, #
+void col0handler (void);                            // values 1, 4, 7, *
+void col1handler (void);                            // values 2, 5, 8, 0
+void col2handler (void);                            // values 3, 6, 9, #
 
 bool areEqual (char array1 [], char array2 []);
 void enterPasswordDigit (char);
@@ -92,6 +93,11 @@ void vibrateSequence (int, int, int);
 void pollMatrixKeypad (void);
 void pollIRSensors (void);
 
+Watchdog &watchMe = Watchdog::get_instance();
+#define wdTimeout 30000
+Thread t;
+EventQueue queue (32 * EVENTS_EVENT_SIZE);
+
 int state = 0;
 char password [4];
 int entered_digits = 0;
@@ -102,43 +108,47 @@ int row;
 int last_irSensorReading = 0;
 int consecutiveIRReading = 0;
 
+int debugInfo = 2;                                  //  0=none, 1=Main, 2=Functions
+
 InterruptIn col0 (PD_0, PullDown);
 InterruptIn col1 (PD_1, PullDown);
 InterruptIn col2 (PD_2, PullDown);
 
-CSE321_LCD LCD_Screen (16, 2, LCD_5x8DOTS, PB_9, PB_8); // col, row, dots, SDA, SCL
+CSE321_LCD LCD_Screen (16, 2, LCD_5x8DOTS, PB_9, PB_8);
 
 int main()
 {
-    
+    if (debugInfo > 0) printf("--------START--------\n");
+    blipLED ();                                     // flash LED to indicate program has started
+    vibrate (500);                                  // buzz vibration motor to the same end
+
+    watchMe.start(wdTimeout);
+    t.start (callback (&queue, &EventQueue::dispatch_forever));
+
     // /* Setup LCD */
     LCD_Screen.begin();
     LCD_Screen.print ("Locked");
     
     /* Setup GPIO */
-    RCC->AHB2ENR |= 0xE;                // peripheral clock: GPIO ports B, C, D enabled (1110 -> 0xE)
-    GPIOB->MODER &= ~(0xF0FF);          // output - 01 (1111 0000 1111 1111 -> 0xF0FF)
-    GPIOB->MODER |= 0x5055;             //             (0101 0100 0101 0101 -> 0x5055)
-    GPIOC->MODER &= ~(0xFF);            // input  - 00 (1111 1111 -> 0xFF)
-    GPIOD->MODER &= ~(0xFF);            // input  - 00 (1111 1111 -> 0xFF)
+    RCC->AHB2ENR |= 0xE;                            // peripheral clock: GPIO ports B, C, D enabled (1110 -> 0xE)
+    GPIOB->MODER &= ~(0xF0FF);                      // output - 01 (1111 0000 1111 1111 -> 0xF0FF)
+    GPIOB->MODER |= 0x5055;                         //             (0101 0100 0101 0101 -> 0x5055)
+    GPIOC->MODER &= ~(0xFF);                        // input  - 00 (1111 1111 -> 0xFF)
+    GPIOD->MODER &= ~(0xFF);                        // input  - 00 (1111 1111 -> 0xFF)
     
     /* Setup Interrupts */
-    col0.rise (&col0handler);
+    col0.rise (queue.event (col0handler));
     col0.enable_irq();
-    col1.rise (&col1handler);
+    col1.rise (queue.event (col1handler));
     col1.enable_irq();
-    col2.rise (&col2handler);
+    col2.rise (queue.event (col2handler));
     col2.enable_irq();
-
-    blipLED ();                         // flash LED to indicate program has started
-    vibrate (500);                      // buzz vibration motor to the same end
 
     // LOOP
     while (true) 
     {
-        /* poll matrix keypad */
-        pollMatrixKeypad();
-        /* poll IR sensors */
+        if (state) watchMe.kick();                  // we don't want program to reset until user has logged out
+        pollMatrixKeypad ();
         pollIRSensors ();
     }
 }
@@ -152,24 +162,22 @@ areEqual (char array1 [], char array2 [])
     return true;
 }
 
-/* Turns on Blue User LED for WAITTIME. */
+/* Turns on Blue User LED (PB_7) for WAITTIME. */
 void
 blipLED (void)
 {
-    // Blue user LED on PB_7
-    GPIOB->ODR |= 0x80; // turn on LED (1000 0000 -> 0x80)
-    wait_us (WAITTIME); // useful so you can't press button again in the meantime (2s)
-    GPIOB->ODR &= ~(0x80); // turn off LED (1000 0000 -> 0x80)
+    GPIOB->ODR |= 0x80;                             // turn on LED (1000 0000 -> 0x80)
+    wait_us (WAITTIME);                             // useful so you can't press button again in the meantime (2s)
+    GPIOB->ODR &= ~(0x80);                          // turn off LED (1000 0000 -> 0x80)
 }
 
-/* Turns on vibrating motor for MS miliseconds. */
+/* Turns on vibrating motor (PB_6) for MS miliseconds. */
 void
 vibrate (int ms)
 {
-    // Vibrating Motor on PB_6
-    GPIOB->ODR |= 0x40; // turn on motor (0100 0000 -> 0x40)
-    wait_us (ms * 1000); // useful so you can't press button again in the meantime (2s)
-    GPIOB->ODR &= ~(0x40); // turn off motor (0100 0000 -> 0x40)
+    GPIOB->ODR |= 0x40;                             // turn on motor (0100 0000 -> 0x40)
+    wait_us (ms * 1000);                            // useful so you can't press button again in the meantime (2s)
+    GPIOB->ODR &= ~(0x40);                          // turn off motor (0100 0000 -> 0x40)
 }
 
 void
@@ -182,12 +190,12 @@ vibrateSequence (int vibrateLength, int pauseLength, int count)
     }
 }
 
-// buzzForPattern (list_of_high/low, list_of_delays)
-
 /* Enter a character into the password. */
 void
 enterPasswordDigit (char digit)
 {
+    if (debugInfo > 1) printf("enterPasswordDigit (%c)\n", digit);
+    watchMe.kick();                                 // pet the dog :)
     if (state) return;
     blipLED();
     if (entered_digits + 1 != 4) vibrate (250);     // don't vibrate on last digit, so status can be heard clearly
@@ -197,9 +205,8 @@ enterPasswordDigit (char digit)
     LCD_Screen.print (&digit);
     LCD_Screen.setCursor(entered_digits, 1);
     LCD_Screen.print (" ");                         // clear weird character when printing digit list
-    if (entered_digits > 1)
+    if (entered_digits > 1)                         // obfuscate prior digit entries by replacing with asterik
     {
-        // obfuscate prior digit entries by replacing with asterik
         LCD_Screen.setCursor(entered_digits - 2, 1);
         LCD_Screen.print("*");
     }
@@ -218,13 +225,13 @@ checkPassword (void)
         LCD_Screen.clear();
         LCD_Screen.setCursor(0, 0);
         LCD_Screen.print("Unlocked");
-        vibrateSequence (250, 250 * 1000, 3);   // 3 short pulses indicate successful login
+        vibrateSequence (250, 250 * 1000, 3);       // 3 short pulses indicate successful login
     }
     else {
         // failure
         LCD_Screen.setCursor(0, 1);
         LCD_Screen.print("Incorrect PWD");
-        wait_us (1000000); // wait for a second, then reset
+        wait_us (1000000);                          // wait for a second, then reset
         resetPassword ();
     }
 }
@@ -233,11 +240,12 @@ checkPassword (void)
 void
 resetPassword (void)
 {
+    if (debugInfo > 1) printf("resetPassword\n");
     state = 0;
     LCD_Screen.clear();
     LCD_Screen.setCursor(0, 0);
     LCD_Screen.print("Locked");
-    vibrateSequence (750, 250 * 1000, 3); // 3 medium pulses indicate reset password
+    vibrateSequence (750, 250 * 1000, 3);           // 3 medium pulses indicate reset password
     entered_digits = 0;
 }
 
@@ -285,89 +293,92 @@ pollMatrixKeypad (void)
             lastMatrixPress = NULL;
         }
 
-        // toggle row 0 (PB0)
-        GPIOB->ODR &= ~(0xF);           // clear port B's outputs (1111 -> 0xF)
-        GPIOB->ODR |= 0x1;              // turn on PB0 (1 -> 0x1)
+        /* toggle row 0 (PB0) */
+        GPIOB->ODR &= ~(0xF);                       // clear port B's outputs (1111 -> 0xF)
+        GPIOB->ODR |= 0x1;                          // turn on PB0 (1 -> 0x1)
         row = 0;
-        wait_us (WAITTIME);             // deals with bounce
+        wait_us (WAITTIME);                         // deals with bounce
 
-        // toggle row 1 (PB1)
-        GPIOB->ODR &= ~(0xF);           // clear port B's outputs (1111 -> 0xF)
-        GPIOB->ODR |= 0x2;              // turn on PB1 (10 -> 0x2)
+        /* toggle row 1 (PB1) */
+        GPIOB->ODR &= ~(0xF);                       // clear port B's outputs (1111 -> 0xF)
+        GPIOB->ODR |= 0x2;                          // turn on PB1 (10 -> 0x2)
         row = 1;
-        wait_us (WAITTIME);             // deals with bounce
+        wait_us (WAITTIME);                         // deals with bounce
         
-        // toggle row 2 (PB2)
-        GPIOB->ODR &= ~(0xF);           // clear port B's outputs (1111 -> 0xF)
-        GPIOB->ODR |= 0x4;              // turn on PB2 (100 -> 0x4)
+        /* toggle row 2 (PB2) */
+        GPIOB->ODR &= ~(0xF);                       // clear port B's outputs (1111 -> 0xF)
+        GPIOB->ODR |= 0x4;                          // turn on PB2 (100 -> 0x4)
         row = 2;
-        wait_us (WAITTIME);             // deals with bounce
+        wait_us (WAITTIME);                         // deals with bounce
 
-        // toggle row 3 (PB3)
-        GPIOB->ODR &= ~(0xF);           // clear port B's outputs (1111 -> 0xF)
-        GPIOB->ODR |= 0x8;              // turn on PB3 (1000 -> 0x8)
+        /* toggle row 3 (PB3) */
+        GPIOB->ODR &= ~(0xF);                       // clear port B's outputs (1111 -> 0xF)
+        GPIOB->ODR |= 0x8;                          // turn on PB3 (1000 -> 0x8)
         row = 3;
-        wait_ns (WAITTIME);             // deals with bounce
+        wait_ns (WAITTIME);                         // deals with bounce
     }
 
+/** Every loop, check IR Sensors. If any fire, store that value and keep looping until the same
+ *  value is held for (WAITTIME * 20).
+ *
+ *  Of Note: 0 is represented by 10, since most of the time the IR sensors pick up zeroes.
+ *          "*" (reset) is represented by 15, so that triggering all IR sensors resets. */
 void
 pollIRSensors (void)
 {
-        // get input
-        int irSensorReading = GPIOC->IDR | 0xFFFFFFF0;
-                                        // ignore other values (..1111 1111 1111 0000 -> 0x..FFF0)
-        irSensorReading = ~(irSensorReading);
-                                        // invert because 0 means IR triggered
-
-        // USER needs to hold the same value for a time to verify, i.e. WAITTIME * 20
-        wait_us (WAITTIME);
-        if (irSensorReading != last_irSensorReading || irSensorReading == 0)
-        {
-            last_irSensorReading = irSensorReading;
-            consecutiveIRReading = 0;
-            return;
-        }
-        consecutiveIRReading++;
-        if (consecutiveIRReading < 5) return;
-
-        switch (irSensorReading)
-        {
-            case 1:
-                enterPasswordDigit ('1');
-                break;
-            case 2:
-                enterPasswordDigit ('2');
-                break;
-            case 3:
-                enterPasswordDigit ('3');
-                break;
-            case 4:
-                enterPasswordDigit ('4');
-                break;
-            case 5:
-                enterPasswordDigit ('5');
-                break;
-            case 6:
-                enterPasswordDigit ('6');
-                break;
-            case 7:
-                enterPasswordDigit ('7');
-                break;
-            case 8:
-                enterPasswordDigit ('8');
-                break;
-            case 9:
-                enterPasswordDigit ('9');
-                break;
-            case 10:
-                enterPasswordDigit ('0');
-                break;
-            case 15:
-                resetPassword ();
-                break;
-        }
-        irSensorReading = 0;
+    
+    int irSensorReading = GPIOC->IDR | 0xFFFFFFF0;  // get input
+                                                    // ignore other values (... 1111 0000 -> 0x...F0)
+    irSensorReading = ~(irSensorReading);           // invert because 0 means IR triggered
+    wait_us (WAITTIME);                             // deals with bounce 
+    /* USER must hold value for a time to verify it's correct (i.e. WAITTIME * 20) */
+    if (irSensorReading != last_irSensorReading || irSensorReading == 0)
+    {
+        last_irSensorReading = irSensorReading;
         consecutiveIRReading = 0;
+        return;
+    }
+    consecutiveIRReading++;
+    if (consecutiveIRReading < 5) return;
+
+    switch (irSensorReading)
+    {
+        case 1:
+            enterPasswordDigit ('1');
+            break;
+        case 2:
+            enterPasswordDigit ('2');
+            break;
+        case 3:
+            enterPasswordDigit ('3');
+            break;
+        case 4:
+            enterPasswordDigit ('4');
+            break;
+        case 5:
+            enterPasswordDigit ('5');
+            break;
+        case 6:
+            enterPasswordDigit ('6');
+            break;
+        case 7:
+            enterPasswordDigit ('7');
+            break;
+        case 8:
+            enterPasswordDigit ('8');
+            break;
+        case 9:
+            enterPasswordDigit ('9');
+            break;
+        case 10:
+            enterPasswordDigit ('0');
+            break;
+        case 15:
+            resetPassword ();
+            break;
+    }
+    irSensorReading = 0;
+    consecutiveIRReading = 0;
 }
 
 void
