@@ -6,7 +6,7 @@
 
 ### Project Description: 
 
-"Project 3 - Accesible Lock" is centered around building a combination lock / security system like in project 2. 
+"Project 3 - Accesible Lock" is centered around building a combination lock / security system like in Project 2. 
     
 However, this time alongside the matrix keypad several accommodations are made for accessibility. 
 
@@ -124,11 +124,11 @@ Documentation. A really interesting file, definitely check it out.
 
 ### 1802.cpp
 
-Library for LCD
+Library for LCD. From Project 2.
 
 ### 1802.h              
 
-Header file for LCD library
+Header file for LCD library. From Project 2.
 
 ### mbed_app.json
 
@@ -188,7 +188,9 @@ CSE321_LCD LCD_Screen (16, 2, LCD_5x8DOTS, PB_9, PB_8);
 
 **void pollMatrixKeypad (void)**
 
-Checks the matrix keypad by toggling power to each row, then checking for a keypress.
+Checks the matrix keypad by toggling power to each row, then checking for a keypress. 
+
+> Much of the functionality was developed in Project 2.
 
 **void pollIRSensors (void)**
 
@@ -198,19 +200,27 @@ Checks the IR Sensors for user input by verifying the same value has been read f
 
 **void enterPasswordDigit (char digit)**
 
-Enters a single digit, from either Matrix Keypad or IR Sensors into password attempt.
+Enters a single digit, from either Matrix Keypad or IR Sensors into password attempt. 
+
+> Abstracted out and further edited from code developed in Project 2.
 
 **void checkPassword (void)**
 
-Checks password, comparing to the correct password that has been hard coded. In the future, this would be encrypted.
+Checks password, comparing to the correct password that has been hard coded. In the future, this would be encrypted. 
+
+> Abstracted out and further edited from code developed in Project 2.
 
 **bool areEqual (char array1 [], char array2 [])**
 
 Helper function for `checkPassword` to verify two array's contain the same elements in the same order. Inputs must be of length 4.
 
+> Code developed in Project 2.
+
 **void resetPassword (void)**
 
 Resets password, allowing user to restart at any point or restart from failure.
+
+> Abstracted out and further edited from code developed in Project 2.
 
 ### colHandlers
 
@@ -221,11 +231,15 @@ The three ISRs for a Matrix key press, by column. This updates global variable `
 - void col1handler (void);        // values 2, 5, 8, 0
 - void col2handler (void);        // values 3, 6, 9, #
 
+> ISRs developed in Project 2.
+
 ### Supplementary Outputs
 
 **void blipLED (void)**
 	
 Turns on Blue User LED for `WAITTIME`, which is defined as 1/10th of a second (0.1).
+
+> Code developed in Project 2.
 
 **void vibrate (int ms)**
 
