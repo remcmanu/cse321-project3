@@ -2,7 +2,7 @@
 
 ## About
 
-### CSE 321 Project 3 - Accesible Lock
+### CSE 321 Project 3 - Accessible Lock
 
 ### Project Description: 
 
